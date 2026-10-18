@@ -1,1 +1,1 @@
-"""Macademia assistant - СЛОЙ 1"""
+"""Macademia assistant — диалоговый ассистент для родителей."""

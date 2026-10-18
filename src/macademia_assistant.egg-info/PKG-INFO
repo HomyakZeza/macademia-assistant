@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: macademia-assistant
-Version: 0.1.0
-Summary: Ассистент для родителей
-Requires-Python: >=3.11
-Requires-Dist: google-api-python-client>=2.100
-Requires-Dist: google-auth>=2.20
-Provides-Extra: dev
-Requires-Dist: pytest>=7.0; extra == "dev"
