@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.json
+!data/samples/*.json
+data/output/
+data/service-account.json
+.pytest_cache/
+.idea/
+.vscode/

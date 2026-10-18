@@ -1,0 +1,1 @@
+"""Macademia assistant - СЛОЙ 1"""
