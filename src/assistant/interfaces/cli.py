@@ -2,27 +2,53 @@ import argparse
 import json
 
 from ..config import load_settings
-from ..google.extraction.extract import run_etl_l1
+from ..gsheets.extraction.workbook_extract import extract_workbook
 
 
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="assistant",
-        description="Извлечение данных из Google Sheets в Layer 1.",
+        description="ETL: Google Sheets → JSON (XLSX-путь).",
     )
-    p.add_argument("--sheet", required=True, help="Имя листа в Google-таблице")
-    p.add_argument("-o", "--output", required=True, help="Путь для выходного JSON")
+    p.add_argument(
+        "-o", "--output",
+        required=True,
+        help="Путь для выходного JSON",
+    )
     args = p.parse_args()
 
     settings = load_settings()
 
-    result = run_etl_l1(
-        spreadsheet_id=settings.google_spreadsheet_id,
-        sheet_name=args.sheet,
-        credentials_path=settings.google_application_credentials,
-        output_path=args.output,
+    workbook = extract_workbook(
+        settings.google_spreadsheet_id,
+        settings.google_application_credentials,
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    from pathlib import Path
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(args.output)
+
+    total_lessons = sum(
+        len(blk.lessons)
+        for sheet in workbook.sheets
+        for blk in sheet.classes
+    )
+    non_empty_blocks = sum(
+        1
+        for sheet in workbook.sheets
+        for blk in sheet.classes
+        if blk.lessons
+    )
+    total_blocks = sum(len(sheet.classes) for sheet in workbook.sheets)
+
+    print(json.dumps({
+        "spreadsheet_id": settings.google_spreadsheet_id,
+        "sheets": len(workbook.sheets),
+        "class_blocks": total_blocks,
+        "non_empty_blocks": non_empty_blocks,
+        "lessons": total_lessons,
+        "output_path": args.output,
+    }, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -37,13 +37,29 @@ class RawExportMeta:
     exported_at: str
     parser_version: str
 
+@dataclass
+class ClassBlock:
+    class_level: Optional[str]
+    class_label: Optional[str]
+    anchor_row: int
+    anchor_col: int
+    lessons: list[RawLesson] = field(default_factory=list)
+
 
 @dataclass
-class RawExport:
+class SheetExport:
+    sheet_name: str
+    subject: str
+    classes: list[ClassBlock] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class WorkbookExport:
     meta: RawExportMeta
-    class_level: Optional[str]
-    subject: Optional[str]
-    lessons: list = field(default_factory=list)
+    sheets: list[SheetExport] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -52,5 +68,6 @@ class RawExport:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
 
     def save(self, path: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_json())
+        from pathlib import Path
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(self.to_json(), encoding="utf-8")
