@@ -11,6 +11,8 @@ CLASS_RE = re.compile(r"\b(\d+)\s*класс", re.IGNORECASE)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 STUDENT_MARKER = "Урок"
+OGE_MARKER = "ДЗ"
+
 
 def _col_letter(idx: int) -> str:
     result = ""
@@ -19,6 +21,8 @@ def _col_letter(idx: int) -> str:
         idx, rem = divmod(idx - 1, 26)
         result = chr(65 + rem) + result
     return result
+
+
 
 def find_anchors(matrix: SheetMatrix) -> list[tuple[int, int]]:
     anchors = []
@@ -51,6 +55,7 @@ def find_bounds(
     return right, bottom
 
 
+
 def find_class_label(
     matrix: SheetMatrix,
     r: int,
@@ -73,30 +78,24 @@ def find_class_label(
     return None, None
 
 
-def _resolve_student_name(row: list[Cell], idx: int) -> str:
-    if idx < len(row) and row[idx].value.strip():
-        return row[idx].value.strip()
-    for j in range(idx - 1, -1, -1):
-        if j < len(row) and row[j].value.strip():
-            return row[j].value.strip()
-    return f"student_{idx}"
 
 def _detect_block_format(
     types_row: list[Cell],
     start: int,
     end: int,
 ) -> str:
-
     markers = set()
     for i in range(start, min(end + 1, len(types_row))):
         v = types_row[i].value.strip()
         if v:
             markers.add(v)
-    if "Урок" in markers:
+
+    if STUDENT_MARKER in markers:
         return "standard"
-    if "ДЗ" in markers:
+    if OGE_MARKER in markers:
         return "oge"
     return "unknown"
+
 
 def _find_student_starts(
     types_row: list[Cell],
@@ -108,7 +107,7 @@ def _find_student_starts(
 
     if block_format == "standard":
         for i in range(start, min(end + 1, len(types_row))):
-            if types_row[i].value.strip() == "Урок":
+            if types_row[i].value.strip() == STUDENT_MARKER:
                 hits.append((i, {
                     "lesson": i,
                     "homework": i + 1,
@@ -116,13 +115,23 @@ def _find_student_starts(
                 }))
     elif block_format == "oge":
         for i in range(start, min(end + 1, len(types_row))):
-            if types_row[i].value.strip() == "ДЗ":
+            if types_row[i].value.strip() == OGE_MARKER:
                 hits.append((i, {
                     "homework": i,
                     "comment": i + 1,
                 }))
 
     return hits
+
+
+def _resolve_student_name(row: list[Cell], idx: int) -> str:
+    if idx < len(row) and row[idx].value.strip():
+        return row[idx].value.strip()
+    for j in range(idx - 1, -1, -1):
+        if j < len(row) and row[j].value.strip():
+            return row[j].value.strip()
+    return f"student_{idx}"
+
 
 
 def _parse_block(
@@ -132,7 +141,6 @@ def _parse_block(
     right: int,
     bottom: int,
 ) -> list[RawLesson]:
-
     if r + 1 >= len(matrix.rows):
         return []
 
@@ -148,18 +156,19 @@ def _parse_block(
         return []
 
     students_meta = []
-    for i, (start_idx, cols) in enumerate(starts):
+    for start_idx, cols in starts:
         students_meta.append({
             "name": _resolve_student_name(names_row, start_idx),
             "columns": cols,
         })
 
-    lessons: list[RawLesson] = []
-
     first_student_idx = min(start_idx for start_idx, _ in starts)
     additional_cols: dict[int, str] = {}
     for idx in range(c + 3, first_student_idx):
         additional_cols[idx] = _col_letter(idx)
+
+    lessons: list[RawLesson] = []
+    date_counters: dict[str, int] = {}
 
     for r_idx in range(r + 2, bottom + 1):
         row = matrix.rows[r_idx]
@@ -167,6 +176,9 @@ def _parse_block(
 
         if not DATE_RE.match(date_value):
             continue
+
+        date_counters[date_value] = date_counters.get(date_value, 0) + 1
+        lesson_seq = date_counters[date_value]
 
         def cell_at(idx):
             if idx is None or idx >= len(row):
@@ -182,6 +194,7 @@ def _parse_block(
             date=date_value,
             topic=cell_at(c + 1).value,
             homework=cell_at(c + 2).value,
+            lesson_seq=lesson_seq,
             additional_fields=additional,
         )
 
@@ -212,16 +225,12 @@ def _parse_block(
 
 
 
-def extract_sheet(
-    matrix: SheetMatrix,
-    subject: str,
-) -> SheetExport:
+def extract_sheet(matrix: SheetMatrix, subject: str) -> SheetExport:
     anchors = find_anchors(matrix)
     if not anchors:
         return SheetExport(sheet_name=matrix.name, subject=subject)
 
     export = SheetExport(sheet_name=matrix.name, subject=subject)
-
     anchors_sorted = sorted(anchors, key=lambda x: (x[0], x[1]))
 
     for i, (r, c) in enumerate(anchors_sorted):

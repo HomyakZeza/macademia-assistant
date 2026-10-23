@@ -13,9 +13,12 @@ __pycache__/
 venv/
 
 .idea/
+.vscode/
 
 .pytest_cache/
 .coverage
 htmlcov/
 
 data/output/
+
+scripts/

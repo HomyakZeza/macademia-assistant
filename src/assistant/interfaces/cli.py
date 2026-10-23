@@ -1,54 +1,49 @@
 import argparse
 import json
+from pathlib import Path
 
 from ..config import load_settings
 from ..gsheets.extraction.workbook_extract import extract_workbook
+from ..gsheets.normalization.pipeline import run_pipeline
 
 
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="assistant",
-        description="ETL: Google Sheets → JSON (XLSX-путь).",
+        description="ETL: Google Sheets → JSON (L1) + SQLite (L2).",
     )
     p.add_argument(
-        "-o", "--output",
-        required=True,
-        help="Путь для выходного JSON",
+        "-o", "--output", required=True,
+        help="Путь для JSON Layer 1 (сырые данные)",
+    )
+    p.add_argument(
+        "--db-output", default=None,
+        help="Путь к SQLite-файлу (канонический формат для LLM)",
     )
     args = p.parse_args()
 
     settings = load_settings()
-
     workbook = extract_workbook(
         settings.google_spreadsheet_id,
         settings.google_application_credentials,
     )
 
-    from pathlib import Path
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     workbook.save(args.output)
 
-    total_lessons = sum(
-        len(blk.lessons)
-        for sheet in workbook.sheets
-        for blk in sheet.classes
-    )
-    non_empty_blocks = sum(
-        1
-        for sheet in workbook.sheets
-        for blk in sheet.classes
-        if blk.lessons
-    )
-    total_blocks = sum(len(sheet.classes) for sheet in workbook.sheets)
-
-    print(json.dumps({
-        "spreadsheet_id": settings.google_spreadsheet_id,
+    summary = {
         "sheets": len(workbook.sheets),
-        "class_blocks": total_blocks,
-        "non_empty_blocks": non_empty_blocks,
-        "lessons": total_lessons,
-        "output_path": args.output,
-    }, ensure_ascii=False, indent=2))
+        "class_blocks": sum(len(s.classes) for s in workbook.sheets),
+        "lessons": sum(
+            len(c.lessons) for s in workbook.sheets for c in s.classes
+        ),
+        "json_output": args.output,
+    }
+
+    if args.db_output:
+        summary["sqlite"] = run_pipeline(workbook, args.db_output)
+
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

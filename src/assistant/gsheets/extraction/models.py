@@ -10,7 +10,6 @@ class Cell:
     comment: str = ""
 
 
-
 @dataclass
 class RawStudent:
     name: str
@@ -24,6 +23,7 @@ class RawLesson:
     date: str
     topic: str
     homework: str
+    lesson_seq: int = 1 # порядковый номер урока в дне
     additional_fields: dict = field(default_factory=dict)
     students: list = field(default_factory=list)
 
@@ -37,20 +37,21 @@ class RawExportMeta:
     exported_at: str
     parser_version: str
 
+
 @dataclass
 class ClassBlock:
     class_level: Optional[str]
     class_label: Optional[str]
     anchor_row: int
     anchor_col: int
-    lessons: list[RawLesson] = field(default_factory=list)
+    lessons: list = field(default_factory=list)
 
 
 @dataclass
 class SheetExport:
     sheet_name: str
     subject: str
-    classes: list[ClassBlock] = field(default_factory=list)
+    classes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -59,7 +60,7 @@ class SheetExport:
 @dataclass
 class WorkbookExport:
     meta: RawExportMeta
-    sheets: list[SheetExport] = field(default_factory=list)
+    sheets: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
