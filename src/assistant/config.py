@@ -33,6 +33,12 @@ def _resolve_path(raw: str) -> str:
         p = _PROJECT_ROOT / p
     return str(p)
 
+def resolve_postgres_ssl_path(raw: str) -> str:
+    absolute = _resolve_path(raw)
+    try:
+        return os.path.relpath(absolute, Path.cwd())
+    except ValueError:
+        return absolute
 
 def _env_optional(key: str) -> Optional[str]:
     v = os.environ.get(key, "").strip()
@@ -68,9 +74,9 @@ def load_settings() -> Settings:
     ssl_key_raw = _env_optional("POSTGRES_SSL_KEY")
     ssl_root_raw = _env_optional("POSTGRES_SSL_ROOTCERT")
 
-    ssl_cert = _resolve_path(ssl_cert_raw) if ssl_cert_raw else None
-    ssl_key = _resolve_path(ssl_key_raw) if ssl_key_raw else None
-    ssl_root = _resolve_path(ssl_root_raw) if ssl_root_raw else None
+    ssl_cert = resolve_postgres_ssl_path(ssl_cert_raw) if ssl_cert_raw else None
+    ssl_key = resolve_postgres_ssl_path(ssl_key_raw) if ssl_key_raw else None
+    ssl_root = resolve_postgres_ssl_path(ssl_root_raw) if ssl_root_raw else None
 
     for name, path in (
         ("POSTGRES_SSL_CERT", ssl_cert),
