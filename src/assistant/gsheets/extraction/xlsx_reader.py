@@ -15,7 +15,6 @@ warnings.filterwarnings(
     module="openpyxl.worksheet._reader",
 )
 
-
 XLSX_MIME = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
@@ -25,18 +24,21 @@ _THREADED_PREFIX = re.compile(
     re.DOTALL,
 )
 
+
 @dataclass
 class SheetMatrix:
     name: str
     rows: list[list[Cell]]
 
 
-def download_xlsx(
-    spreadsheet_id: str,
-    credentials_path: str,
-    max_retries: int = 5,
-) -> bytes:
 
+def download_xlsx(
+        spreadsheet_id: str,
+        credentials_path: str,
+        max_retries: int = 5,
+) -> bytes:
+    import socket
+    import ssl
     import time
 
     from google.oauth2.service_account import Credentials
@@ -57,39 +59,42 @@ def download_xlsx(
                 mimeType=XLSX_MIME,
             ).execute()
         except HttpError as e:
-            # Повтор для ошибок google
             if e.resp.status < 500 or attempt == max_retries:
                 raise
             last_error = e
-            delay = 2 ** (attempt - 1)
-            print(
-                f"  Google вернул {e.resp.status}, "
-                f"попытка {attempt}/{max_retries}, "
-                f"повтор через {delay} сек..."
-            )
-            time.sleep(delay)
+            reason = f"HTTP {e.resp.status}"
+        except (TimeoutError, socket.timeout, ssl.SSLError) as e:
+            if attempt == max_retries:
+                raise
+            last_error = e
+            reason = f"сетевая ошибка ({type(e).__name__})"
+
+        delay = 2 ** (attempt - 1)
+        print(
+            f"  {reason}, попытка {attempt}/{max_retries}, "
+            f"повтор через {delay} сек..."
+        )
+        time.sleep(delay)
 
     raise last_error
+
+
 
 def _extract_value(cell) -> str:
     v = cell.value
     if v is None:
         return ""
-
     if isinstance(v, float):
         if v.is_integer():
             return str(int(v))
         return str(v)
-
     if isinstance(v, int):
         return str(v)
-
     if hasattr(v, "strftime"):
         try:
             return v.strftime("%Y-%m-%d")
         except Exception:
             return str(v)
-
     return str(v).strip()
 
 
@@ -120,12 +125,21 @@ def _extract_color(cell) -> Optional[str]:
     return None
 
 
-def _extract_comment(cell) -> str:
+def _extract_comment(cell) -> tuple[str, str]:
     if not cell.comment:
-        return ""
+        return "", ""
+
     text = cell.comment.text or ""
     text = _THREADED_PREFIX.sub("", text).strip()
-    return text
+
+    date_str = ""
+    if hasattr(cell.comment, "date") and cell.comment.date:
+        try:
+            date_str = cell.comment.date.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    return text, date_str
 
 
 
@@ -158,10 +172,12 @@ def parse_workbook(data: bytes) -> list[SheetMatrix]:
             row_cells: list[Cell] = []
             for c in range(1, last_col + 1):
                 cell = ws.cell(row=r, column=c)
+                c_text, c_date = _extract_comment(cell)
                 row_cells.append(Cell(
                     value=_extract_value(cell),
                     color=_extract_color(cell),
-                    comment=_extract_comment(cell),
+                    comment=c_text,
+                    comment_date=c_date,
                 ))
             rows.append(row_cells)
 
@@ -170,10 +186,9 @@ def parse_workbook(data: bytes) -> list[SheetMatrix]:
     return matrices
 
 
-
 def load_workbook_matrices(
-    spreadsheet_id: str,
-    credentials_path: str,
+        spreadsheet_id: str,
+        credentials_path: str,
 ) -> list[SheetMatrix]:
     data = download_xlsx(spreadsheet_id, credentials_path)
     return parse_workbook(data)

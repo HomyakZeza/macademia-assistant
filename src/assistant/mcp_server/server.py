@@ -4,6 +4,7 @@ from .tools.attendance import get_attendance as _get_attendance
 from .tools.grades import get_grades as _get_grades
 from .tools.grades import get_summary as _get_summary
 from .tools.students import list_children as _list_children
+from .tools.comments import get_comments as _get_comments
 
 
 mcp = FastMCP("macademia-assistant")
@@ -87,6 +88,21 @@ def get_attendance(
         from_date, to_date, subject,
     )
 
+@mcp.tool(
+    description=(
+        "Возвращает текстовые комментарии учителей к работам ребёнка. "
+        "requester_people_id — UUID родителя (кто спрашивает). "
+        "child_people_id — UUID ребёнка (о ком). "
+        "subject — фильтр по предмету, опционально. "
+        "Возвращает {student, comments: [{date, subject, text}], count}."
+    ),
+)
+def get_comments(
+    requester_people_id: str,
+    child_people_id: str,
+    subject: str | None = None,
+) -> dict:
+    return _get_comments(requester_people_id, child_people_id, subject)
 
 def main() -> None:
     mcp.run()

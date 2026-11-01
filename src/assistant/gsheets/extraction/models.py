@@ -8,11 +8,14 @@ class Cell:
     value: str = ""
     color: Optional[str] = None
     comment: str = ""
+    comment_date: str = ""
 
 
 @dataclass
 class RawStudent:
     name: str
+    comment: str = ""
+    comment_date: str = ""
     lesson: Cell = field(default_factory=Cell)
     homework: Cell = field(default_factory=Cell)
     test: Cell = field(default_factory=Cell)
@@ -23,7 +26,7 @@ class RawLesson:
     date: str
     topic: str
     homework: str
-    lesson_seq: int = 1 # порядковый номер урока в дне
+    lesson_seq: int = 1
     additional_fields: dict = field(default_factory=dict)
     students: list = field(default_factory=list)
 

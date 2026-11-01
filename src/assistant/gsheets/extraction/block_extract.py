@@ -23,7 +23,6 @@ def _col_letter(idx: int) -> str:
     return result
 
 
-
 def find_anchors(matrix: SheetMatrix) -> list[tuple[int, int]]:
     anchors = []
     for r_idx, row in enumerate(matrix.rows):
@@ -55,7 +54,6 @@ def find_bounds(
     return right, bottom
 
 
-
 def find_class_label(
     matrix: SheetMatrix,
     r: int,
@@ -76,7 +74,6 @@ def find_class_label(
             if m:
                 return m.group(1), v
     return None, None
-
 
 
 def _detect_block_format(
@@ -133,7 +130,6 @@ def _resolve_student_name(row: list[Cell], idx: int) -> str:
     return f"student_{idx}"
 
 
-
 def _parse_block(
     matrix: SheetMatrix,
     r: int,
@@ -157,8 +153,11 @@ def _parse_block(
 
     students_meta = []
     for start_idx, cols in starts:
+        name_cell = names_row[start_idx] if start_idx < len(names_row) else Cell()
         students_meta.append({
             "name": _resolve_student_name(names_row, start_idx),
+            "comment": name_cell.comment,
+            "comment_date": name_cell.comment_date,
             "columns": cols,
         })
 
@@ -214,6 +213,8 @@ def _parse_block(
 
             lesson.students.append(RawStudent(
                 name=meta["name"],
+                comment=meta["comment"],
+                comment_date=meta["comment_date"],
                 lesson=lesson_cell,
                 homework=hw_cell,
                 test=test_cell,
@@ -222,7 +223,6 @@ def _parse_block(
         lessons.append(lesson)
 
     return lessons
-
 
 
 def extract_sheet(matrix: SheetMatrix, subject: str) -> SheetExport:

@@ -39,13 +39,22 @@ class RecordRow:
 
 
 @dataclass
+class StudentCommentRow:
+    student_name: str
+    class_level: str
+    subject: str
+    date: str
+    text: str
+
+
+@dataclass
 class ParsedBlock:
     lessons: list[LessonRow] = field(default_factory=list)
     records: list[RecordRow] = field(default_factory=list)
+    comments: list[StudentCommentRow] = field(default_factory=list)
 
 
 class SheetParser(ABC):
-
     @abstractmethod
     def transform(self, block: ClassBlock, subject: str) -> ParsedBlock:
         ...
