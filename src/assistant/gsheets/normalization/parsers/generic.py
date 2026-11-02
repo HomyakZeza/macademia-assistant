@@ -1,22 +1,19 @@
-from typing import Optional
-from ...extraction.models import Cell, ClassBlock
 from ..base import LessonRow, ParsedBlock, RecordRow, SheetParser, StudentCommentRow
+from ..utils import to_float, merge_comments
+from ...extraction.models import Cell, ClassBlock, RawLesson, StudentCells
 from ..registry import sheet_parser
 
-def _to_float(value: str) -> Optional[float]:
-    if not value: return None
-    try: return float(value.replace(",", "."))
-    except (ValueError, AttributeError): return None
-
-def _is_absent(cell: Cell) -> bool:
-    return cell.value.strip().lower() in ("н", "н.")
-
-@sheet_parser(r".*")
 class GenericParser(SheetParser):
     def transform(self, block: ClassBlock, subject: str) -> ParsedBlock:
         result = ParsedBlock()
-        class_level = block.class_level or ""
-        block_label = block.class_label or ""
+        class_level, block_label = block.class_level or "", block.class_label or ""
+
+        for name, info in block.students_info.items():
+            for c in info.comments:
+                result.comments.append(StudentCommentRow(
+                    student_name=name, class_level=class_level, subject=subject,
+                    date=c.date, text=c.text
+                ))
 
         for lesson in block.lessons:
             result.lessons.append(LessonRow(
@@ -25,31 +22,35 @@ class GenericParser(SheetParser):
                 topic=lesson.topic or "", homework_text=lesson.homework or None,
             ))
 
-            for st in lesson.students:
-                if st.comment:
-                    result.comments.append(StudentCommentRow(
-                        student_name=st.name, class_level=class_level, subject=subject,
-                        date=st.comment_date, text=st.comment
-                    ))
-
-                if st.lesson.value.strip() == "#":
+            for student in lesson.students:
+                if student.lesson.value.strip() == "#":
                     continue
 
                 record = RecordRow(
-                    student_name=st.name, date=lesson.date, class_level=class_level,
+                    student_name=student.student_name, date=lesson.date, class_level=class_level,
                     subject=subject, block_label=block_label, lesson_seq=lesson.lesson_seq,
-                    is_absent=_is_absent(st.lesson),
+                    is_absent=self._get_is_absent(student.lesson)
                 )
 
-                record.lesson_grade = _to_float(st.lesson.value)
-                record.lesson_comment = st.lesson.comment or None
-
-                record.homework_grade = _to_float(st.homework.value)
-                record.homework_comment = st.homework.comment or None
-
-                record.test_grade = _to_float(st.test.value)
-                record.test_comment = st.test.comment or None
+                self._fill_lesson(record, student, lesson)
+                self._fill_homework(record, student, lesson)
+                self._fill_test(record, student, lesson)
 
                 result.records.append(record)
 
         return result
+
+    def _get_is_absent(self, cell: Cell) -> bool:
+        return cell.value.strip().lower() in ("н", "н.")
+
+    def _fill_lesson(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        record.lesson_grade = to_float(student.lesson.value)
+        record.lesson_comment = merge_comments(student.lesson.comment, "")
+
+    def _fill_homework(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        record.homework_grade = to_float(student.homework.value)
+        record.homework_comment = merge_comments(student.homework.comment, "")
+
+    def _fill_test(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        record.test_grade = to_float(student.test.value)
+        record.test_comment = merge_comments(student.test.comment, "")

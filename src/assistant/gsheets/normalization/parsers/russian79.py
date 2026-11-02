@@ -1,66 +1,29 @@
 from typing import Optional
-from ...extraction.models import Cell, ClassBlock
-from ..base import LessonRow, ParsedBlock, RecordRow, SheetParser, StudentCommentRow
+from ...extraction.models import Cell, RawLesson, StudentCells
+from ..base import RecordRow
 from ..colors import ColorCategory, classify_color
 from ..registry import sheet_parser
+from ..utils import to_float, merge_comments
+from .generic import GenericParser
 
-CATEGORY_TO_GRADE = {
-    ColorCategory.RED: 2, ColorCategory.ORANGE: 3, ColorCategory.GREEN: 5,
-}
+CATEGORY_TO_GRADE = {ColorCategory.RED: 2, ColorCategory.ORANGE: 3, ColorCategory.GREEN: 5}
 
 def _cell_to_grade(cell: Cell) -> Optional[float]:
     cat = classify_color(cell.color)
-    if cat in CATEGORY_TO_GRADE:
-        return float(CATEGORY_TO_GRADE[cat])
-    if cell.value:
-        try: return float(cell.value.strip().replace(",", "."))
-        except ValueError: return None
-    return None
-
-def _is_absent(cell: Cell) -> bool:
-    return cell.value.strip().lower() == "н"
+    if cat in CATEGORY_TO_GRADE: return float(CATEGORY_TO_GRADE[cat])
+    return to_float(cell.value)
 
 @sheet_parser(r"Русский 7-9")
-class Russian79Parser(SheetParser):
-    def transform(self, block: ClassBlock, subject: str) -> ParsedBlock:
-        result = ParsedBlock()
-        class_level = block.class_level or ""
-        block_label = block.class_label or ""
+class Russian79Parser(GenericParser):
+    def _fill_lesson(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        if not record.is_absent:
+            record.lesson_grade = _cell_to_grade(student.lesson)
+        record.lesson_comment = merge_comments(student.lesson.comment, "")
 
-        for lesson in block.lessons:
-            result.lessons.append(LessonRow(
-                date=lesson.date, class_level=class_level, subject=subject,
-                block_label=block_label, lesson_seq=lesson.lesson_seq,
-                topic=lesson.topic or "", homework_text=lesson.homework or None,
-            ))
+    def _fill_homework(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        record.homework_grade = _cell_to_grade(student.homework)
+        record.homework_comment = merge_comments(student.homework.comment, "")
 
-            for st in lesson.students:
-                if st.comment:
-                    result.comments.append(StudentCommentRow(
-                        student_name=st.name, class_level=class_level, subject=subject,
-                        date=st.comment_date, text=st.comment
-                    ))
-
-                if st.lesson.value.strip() == "#":
-                    continue
-
-                is_absent = _is_absent(st.lesson)
-                record = RecordRow(
-                    student_name=st.name, date=lesson.date, class_level=class_level,
-                    subject=subject, block_label=block_label, lesson_seq=lesson.lesson_seq,
-                    is_absent=is_absent,
-                )
-
-                record.homework_grade = _cell_to_grade(st.homework)
-                record.homework_comment = st.homework.comment or None
-
-                if not is_absent:
-                    record.lesson_grade = _cell_to_grade(st.lesson)
-                record.lesson_comment = st.lesson.comment or None
-
-                record.test_grade = _cell_to_grade(st.test)
-                record.test_comment = st.test.comment or None
-
-                result.records.append(record)
-
-        return result
+    def _fill_test(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
+        record.test_grade = _cell_to_grade(student.test)
+        record.test_comment = merge_comments(student.test.comment, "")

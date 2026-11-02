@@ -2,7 +2,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 import json
 
-
 @dataclass
 class Cell:
     value: str = ""
@@ -10,16 +9,22 @@ class Cell:
     comment: str = ""
     comment_date: str = ""
 
+@dataclass
+class StudentComment:
+    date: str
+    text: str
 
 @dataclass
-class RawStudent:
+class RawStudentInfo:
     name: str
-    comment: str = ""
-    comment_date: str = ""
+    comments: list[StudentComment] = field(default_factory=list)
+
+@dataclass
+class StudentCells:
+    student_name: str
     lesson: Cell = field(default_factory=Cell)
     homework: Cell = field(default_factory=Cell)
     test: Cell = field(default_factory=Cell)
-
 
 @dataclass
 class RawLesson:
@@ -28,8 +33,7 @@ class RawLesson:
     homework: str
     lesson_seq: int = 1
     additional_fields: dict = field(default_factory=dict)
-    students: list = field(default_factory=list)
-
+    students: list[StudentCells] = field(default_factory=list)
 
 @dataclass
 class RawExportMeta:
@@ -40,15 +44,14 @@ class RawExportMeta:
     exported_at: str
     parser_version: str
 
-
 @dataclass
 class ClassBlock:
     class_level: Optional[str]
     class_label: Optional[str]
     anchor_row: int
     anchor_col: int
-    lessons: list = field(default_factory=list)
-
+    students_info: dict[str, RawStudentInfo] = field(default_factory=dict)
+    lessons: list[RawLesson] = field(default_factory=list)
 
 @dataclass
 class SheetExport:
@@ -58,7 +61,6 @@ class SheetExport:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
 
 @dataclass
 class WorkbookExport:

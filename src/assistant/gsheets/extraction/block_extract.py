@@ -1,15 +1,11 @@
 import re
 from typing import Optional
-
-from .models import (
-    Cell, RawStudent, RawLesson, SheetExport, ClassBlock,
-)
+from openpyxl.utils import get_column_letter
+from .models import Cell, RawStudentInfo, StudentCells, StudentComment, RawLesson, SheetExport, ClassBlock
 from .xlsx_reader import SheetMatrix
-
 
 CLASS_RE = re.compile(r"\b(\d+)\s*класс", re.IGNORECASE)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
 STUDENT_MARKER = "Урок"
 OGE_MARKER = "ДЗ"
 
@@ -24,177 +20,106 @@ def _col_letter(idx: int) -> str:
 
 
 def find_anchors(matrix: SheetMatrix) -> list[tuple[int, int]]:
-    anchors = []
-    for r_idx, row in enumerate(matrix.rows):
-        for c_idx, cell in enumerate(row):
-            if cell.value.strip().lower() == "дата":
-                anchors.append((r_idx, c_idx))
-    return anchors
+    return [(r, c) for r, row in enumerate(matrix.rows) for c, cell in enumerate(row) if
+            cell.value.strip().lower() == "дата"]
 
 
-def find_bounds(
-    matrix: SheetMatrix,
-    anchors: list[tuple[int, int]],
-    r: int,
-    c: int,
-) -> tuple[int, int]:
-    rows = len(matrix.rows)
-    cols = len(matrix.rows[r]) if rows else 0
-
-    right = cols - 1
+def find_bounds(matrix: SheetMatrix, anchors: list[tuple[int, int]], r: int, c: int) -> tuple[int, int]:
+    right = (len(matrix.rows[r]) if matrix.rows else 0) - 1
     for r2, c2 in anchors:
-        if r2 == r and c2 > c:
-            right = min(right, c2 - 1)
-
-    bottom = rows - 1
+        if r2 == r and c2 > c: right = min(right, c2 - 1)
+    bottom = len(matrix.rows) - 1
     for r2, c2 in anchors:
-        if c2 == c and r2 > r:
-            bottom = min(bottom, r2 - 1)
-
+        if c2 == c and r2 > r: bottom = min(bottom, r2 - 1)
     return right, bottom
 
 
-def find_class_label(
-    matrix: SheetMatrix,
-    r: int,
-    c: int,
-) -> tuple[Optional[str], Optional[str]]:
+def find_class_label(matrix: SheetMatrix, r: int, c: int) -> tuple[Optional[str], Optional[str]]:
     for dr in (1, 2, 3, 4):
         row_idx = r - dr
-        if row_idx < 0:
-            continue
+        if row_idx < 0: continue
         for dc in (0, -1, 1, -2, 2):
             col_idx = c + dc
-            if col_idx < 0 or col_idx >= len(matrix.rows[row_idx]):
-                continue
+            if col_idx < 0 or col_idx >= len(matrix.rows[row_idx]): continue
             v = matrix.rows[row_idx][col_idx].value.strip()
-            if not v:
-                continue
-            m = CLASS_RE.search(v)
-            if m:
-                return m.group(1), v
+            m = CLASS_RE.search(v) if v else None
+            if m: return m.group(1), v
     return None, None
 
 
-def _detect_block_format(
-    types_row: list[Cell],
-    start: int,
-    end: int,
-) -> str:
-    markers = set()
-    for i in range(start, min(end + 1, len(types_row))):
-        v = types_row[i].value.strip()
-        if v:
-            markers.add(v)
-
-    if STUDENT_MARKER in markers:
-        return "standard"
-    if OGE_MARKER in markers:
-        return "oge"
+def _detect_block_format(types_row: list[Cell], start: int, end: int) -> str:
+    markers = {types_row[i].value.strip() for i in range(start, min(end + 1, len(types_row))) if
+               types_row[i].value.strip()}
+    if STUDENT_MARKER in markers: return "standard"
+    if OGE_MARKER in markers: return "oge"
     return "unknown"
 
 
-def _find_student_starts(
-    types_row: list[Cell],
-    start: int,
-    end: int,
-    block_format: str,
-) -> list[tuple[int, dict]]:
-    hits: list[tuple[int, dict]] = []
-
-    if block_format == "standard":
+def _find_student_starts(types_row: list[Cell], start: int, end: int, fmt: str) -> list[tuple[int, dict]]:
+    hits = []
+    if fmt == "standard":
         for i in range(start, min(end + 1, len(types_row))):
             if types_row[i].value.strip() == STUDENT_MARKER:
-                hits.append((i, {
-                    "lesson": i,
-                    "homework": i + 1,
-                    "test": i + 2,
-                }))
-    elif block_format == "oge":
+                hits.append((i, {"lesson": i, "homework": i + 1, "test": i + 2}))
+    elif fmt == "oge":
         for i in range(start, min(end + 1, len(types_row))):
             if types_row[i].value.strip() == OGE_MARKER:
-                hits.append((i, {
-                    "homework": i,
-                    "comment": i + 1,
-                }))
-
+                hits.append((i, {"homework": i, "comment": i + 1}))
     return hits
 
 
 def _resolve_student_name(row: list[Cell], idx: int) -> str:
-    if idx < len(row) and row[idx].value.strip():
-        return row[idx].value.strip()
+    if idx < len(row) and row[idx].value.strip(): return row[idx].value.strip()
     for j in range(idx - 1, -1, -1):
-        if j < len(row) and row[j].value.strip():
-            return row[j].value.strip()
+        if j < len(row) and row[j].value.strip(): return row[j].value.strip()
     return f"student_{idx}"
 
 
-def _parse_block(
-    matrix: SheetMatrix,
-    r: int,
-    c: int,
-    right: int,
-    bottom: int,
-) -> list[RawLesson]:
-    if r + 1 >= len(matrix.rows):
-        return []
+def _parse_block(matrix: SheetMatrix, r: int, c: int, right: int, bottom: int) -> tuple[
+    dict[str, RawStudentInfo], list[RawLesson]]:
+    if r + 1 >= len(matrix.rows): return {}, []
+    names_row, types_row = matrix.rows[r], matrix.rows[r + 1]
+    fmt = _detect_block_format(types_row, c, right)
+    starts = _find_student_starts(types_row, c, right, fmt)
+    if not starts: return {}, []
 
-    names_row = matrix.rows[r]
-    types_row = matrix.rows[r + 1]
-
-    block_format = _detect_block_format(types_row, c, right)
-    if block_format == "unknown":
-        return []
-
-    starts = _find_student_starts(types_row, c, right, block_format)
-    if not starts:
-        return []
-
+    students_info = {}
     students_meta = []
+
     for start_idx, cols in starts:
-        name_cell = names_row[start_idx] if start_idx < len(names_row) else Cell()
-        students_meta.append({
-            "name": _resolve_student_name(names_row, start_idx),
-            "comment": name_cell.comment,
-            "comment_date": name_cell.comment_date,
-            "columns": cols,
-        })
+        name = _resolve_student_name(names_row, start_idx)
+        cell_ref = f"{get_column_letter(start_idx + 1)}{r + 1}"
 
-    first_student_idx = min(start_idx for start_idx, _ in starts)
-    additional_cols: dict[int, str] = {}
-    for idx in range(c + 3, first_student_idx):
-        additional_cols[idx] = _col_letter(idx)
+        raw_comments = matrix.threaded_comments.get(cell_ref, [])
+        comments = [StudentComment(date=d, text=t) for d, t in raw_comments]
 
-    lessons: list[RawLesson] = []
-    date_counters: dict[str, int] = {}
+        if not comments:
+            name_cell = names_row[start_idx] if start_idx < len(names_row) else Cell()
+            if name_cell.comment:
+                comments = [StudentComment(date=name_cell.comment_date, text=name_cell.comment)]
+
+        students_info[name] = RawStudentInfo(name=name, comments=comments)
+        students_meta.append({"name": name, "columns": cols})
+
+    first_student_idx = min(idx for idx, _ in starts)
+    additional_cols = {idx: _col_letter(idx) for idx in range(c + 3, first_student_idx)}
+
+    lessons, date_counters = [], {}
 
     for r_idx in range(r + 2, bottom + 1):
         row = matrix.rows[r_idx]
         date_value = row[c].value.strip() if c < len(row) else ""
-
-        if not DATE_RE.match(date_value):
-            continue
+        if not DATE_RE.match(date_value): continue
 
         date_counters[date_value] = date_counters.get(date_value, 0) + 1
         lesson_seq = date_counters[date_value]
 
         def cell_at(idx):
-            if idx is None or idx >= len(row):
-                return Cell()
-            return row[idx]
-
-        additional = {
-            name: cell_at(idx).value
-            for idx, name in additional_cols.items()
-        }
+            return row[idx] if idx is not None and idx < len(row) else Cell()
 
         lesson = RawLesson(
-            date=date_value,
-            topic=cell_at(c + 1).value,
-            homework=cell_at(c + 2).value,
-            lesson_seq=lesson_seq,
-            additional_fields=additional,
+            date=date_value, topic=cell_at(c + 1).value, homework=cell_at(c + 2).value,
+            lesson_seq=lesson_seq, additional_fields={name: cell_at(idx).value for idx, name in additional_cols.items()}
         )
 
         for meta in students_meta:
@@ -204,56 +129,35 @@ def _parse_block(
             test_cell = cell_at(cols.get("test")) if "test" in cols else Cell()
 
             if "comment" in cols:
-                comment_cell = cell_at(cols["comment"])
-                hw_cell = Cell(
-                    value=hw_cell.value,
-                    color=hw_cell.color,
-                    comment=comment_cell.value,
-                )
+                hw_cell = Cell(value=hw_cell.value, color=hw_cell.color, comment=cell_at(cols["comment"]).value)
 
-            lesson.students.append(RawStudent(
-                name=meta["name"],
-                comment=meta["comment"],
-                comment_date=meta["comment_date"],
-                lesson=lesson_cell,
-                homework=hw_cell,
-                test=test_cell,
+            lesson.students.append(StudentCells(
+                student_name=meta["name"], lesson=lesson_cell, homework=hw_cell, test=test_cell
             ))
-
         lessons.append(lesson)
 
-    return lessons
+    return students_info, lessons
 
 
 def extract_sheet(matrix: SheetMatrix, subject: str) -> SheetExport:
     anchors = find_anchors(matrix)
-    if not anchors:
-        return SheetExport(sheet_name=matrix.name, subject=subject)
+    if not anchors: return SheetExport(sheet_name=matrix.name, subject=subject)
 
     export = SheetExport(sheet_name=matrix.name, subject=subject)
-    anchors_sorted = sorted(anchors, key=lambda x: (x[0], x[1]))
-
-    for i, (r, c) in enumerate(anchors_sorted):
+    for i, (r, c) in enumerate(sorted(anchors, key=lambda x: (x[0], x[1]))):
         right, bottom = find_bounds(matrix, anchors, r, c)
-
         if i == 0:
-            a1 = matrix.rows[0][0].value.strip() if matrix.rows else ""
-            m = CLASS_RE.search(a1)
-            if m:
-                class_level, class_label = m.group(1), a1
-            else:
-                class_level, class_label = find_class_label(matrix, r, c)
+            m = CLASS_RE.search(matrix.rows[0][0].value.strip() if matrix.rows else "")
+            class_level, class_label = (m.group(1), matrix.rows[0][0].value.strip()) if m else find_class_label(matrix,
+                                                                                                                r, c)
         else:
             class_level, class_label = find_class_label(matrix, r, c)
 
-        lessons = _parse_block(matrix, r, c, right, bottom)
+        students_info, lessons = _parse_block(matrix, r, c, right, bottom)
 
         export.classes.append(ClassBlock(
-            class_level=class_level,
-            class_label=class_label,
-            anchor_row=r + 1,
-            anchor_col=c + 1,
-            lessons=lessons,
+            class_level=class_level, class_label=class_label,
+            anchor_row=r + 1, anchor_col=c + 1,
+            students_info=students_info, lessons=lessons
         ))
-
     return export

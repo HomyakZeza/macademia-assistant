@@ -1,12 +1,10 @@
-"""Комментарии учителей к ребенку"""
-
+"""Комментарии учителей к ребенку."""
 from ..db import PermissionDenied, get_db, get_permission_service
 
-
 def get_comments(
-        requester_people_id: str,
-        child_people_id: str,
-        subject: str | None = None,
+    requester_people_id: str,
+    child_people_id: str,
+    subject: str | None = None,
 ) -> dict:
     try:
         perm = get_permission_service()
@@ -28,9 +26,6 @@ def get_comments(
 
         query = "SELECT subject, date, text FROM student_comments WHERE student_id = ?"
         params = [student["id"]]
-
-        if subject:
-            pass
 
         rows = conn.execute(query + " ORDER BY date", params).fetchall()
 
