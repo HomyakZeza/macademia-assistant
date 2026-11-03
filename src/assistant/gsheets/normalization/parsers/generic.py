@@ -6,7 +6,8 @@ from ..registry import sheet_parser
 class GenericParser(SheetParser):
     def transform(self, block: ClassBlock, subject: str) -> ParsedBlock:
         result = ParsedBlock()
-        class_level, block_label = block.class_level or "", block.class_label or ""
+        class_level = block.class_level or ""
+        block_label = block.class_label or ""
 
         for name, info in block.students_info.items():
             for c in info.comments:

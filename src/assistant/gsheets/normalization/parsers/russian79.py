@@ -6,11 +6,16 @@ from ..registry import sheet_parser
 from ..utils import to_float, merge_comments
 from .generic import GenericParser
 
-CATEGORY_TO_GRADE = {ColorCategory.RED: 2, ColorCategory.ORANGE: 3, ColorCategory.GREEN: 5}
+CATEGORY_TO_GRADE = {
+    ColorCategory.RED: 2,
+    ColorCategory.ORANGE: 3,
+    ColorCategory.GREEN: 5,
+}
 
 def _cell_to_grade(cell: Cell) -> Optional[float]:
     cat = classify_color(cell.color)
-    if cat in CATEGORY_TO_GRADE: return float(CATEGORY_TO_GRADE[cat])
+    if cat in CATEGORY_TO_GRADE:
+        return float(CATEGORY_TO_GRADE[cat])
     return to_float(cell.value)
 
 @sheet_parser(r"Русский 7-9")

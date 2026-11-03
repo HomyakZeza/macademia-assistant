@@ -1,5 +1,4 @@
-from typing import Optional
-from ...extraction.models import Cell, RawLesson, StudentCells
+from ...extraction.models import RawLesson, StudentCells
 from ..base import RecordRow
 from ..colors import ColorCategory, classify_color
 from ..registry import sheet_parser
@@ -7,9 +6,12 @@ from ..utils import to_float, merge_comments
 from .generic import GenericParser
 
 CATEGORY_TO_COMMENT = {
-    ColorCategory.GREEN: "всё хорошо", ColorCategory.YELLOW: "есть вопросы",
-    ColorCategory.ORANGE: "требует доработки", ColorCategory.RED: "всё плохо",
+    ColorCategory.GREEN: "всё хорошо",
+    ColorCategory.YELLOW: "есть вопросы",
+    ColorCategory.ORANGE: "требует доработки",
+    ColorCategory.RED: "всё плохо",
 }
+
 
 @sheet_parser(r"Физика.*")
 class PhysicsParser(GenericParser):
@@ -19,8 +21,12 @@ class PhysicsParser(GenericParser):
     def _fill_homework(self, record: RecordRow, student: StudentCells, lesson: RawLesson) -> None:
         hw_value = to_float(student.homework.value)
         if hw_value is not None:
-            percent = hw_value * 100 if hw_value <= 1.0 else hw_value
+            if hw_value <= 1.0:
+                percent = hw_value * 100
+            else:
+                percent = hw_value
             record.homework_completed_percent = round(percent, 1)
+
         gen_comment = CATEGORY_TO_COMMENT.get(classify_color(student.homework.color), "")
         record.homework_comment = merge_comments(student.homework.comment, gen_comment)
 
