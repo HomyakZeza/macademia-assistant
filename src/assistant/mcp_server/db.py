@@ -3,10 +3,22 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+import psycopg
 from ..config import load_settings
 from ..gsheets.storage.reader import open_current_db
 
 
+def get_pg_connection(settings) -> psycopg.Connection:
+    kwargs = {}
+    if settings.postgres_ssl_cert:
+        kwargs["sslmode"] = settings.postgres_sslmode
+        kwargs["sslcert"] = settings.postgres_ssl_cert
+        if settings.postgres_ssl_key:
+            kwargs["sslkey"] = settings.postgres_ssl_key
+        if settings.postgres_ssl_rootcert:
+            kwargs["sslrootcert"] = settings.postgres_ssl_rootcert
+
+    return psycopg.connect(settings.postgres_dsn, **kwargs)
 
 def get_db() -> tuple[sqlite3.Connection, str]:
     settings = load_settings()
@@ -30,16 +42,7 @@ class PermissionService:
         self._pg_conn = None
         if self._dsn:
             try:
-                import psycopg
-                kwargs = {}
-                if settings.postgres_ssl_cert:
-                    kwargs["sslmode"] = settings.postgres_sslmode
-                    kwargs["sslcert"] = settings.postgres_ssl_cert
-                    if settings.postgres_ssl_key:
-                        kwargs["sslkey"] = settings.postgres_ssl_key
-                    if settings.postgres_ssl_rootcert:
-                        kwargs["sslrootcert"] = settings.postgres_ssl_rootcert
-                self._pg_conn = psycopg.connect(self._dsn, **kwargs)
+                self._pg_conn = get_pg_connection(settings)
             except Exception as e:
                 print(f"PermissionService: PostgreSQL недоступен: {e}")
                 self._pg_conn = None

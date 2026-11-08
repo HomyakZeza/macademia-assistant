@@ -44,7 +44,6 @@ class AgentLoop:
             print(msg)
 
     async def _load_tools(self) -> list[dict]:
-        """Загружает MCP-инструменты и добавляет execute_python."""
         if self._tools_schema is not None:
             return self._tools_schema
 
@@ -149,3 +148,39 @@ class AgentLoop:
             "messages": messages,
             "steps": self.max_steps,
         }
+
+    async def run_with_history(self, messages: list[dict]) -> str:
+        tools_schema = await self._load_tools()
+
+        for step in range(1, self.max_steps + 1):
+            self._log(f"\n--- Шаг {step} ---")
+            response = self.llm.chat(messages, tools=tools_schema)
+            messages.append(response)
+
+            tool_calls = response.get("tool_calls")
+            if not tool_calls:
+                return response.get("content") or ""
+
+            if response.get("content"):
+                self._log(f"LLM: {response['content']}")
+
+
+            for tool_call in tool_calls:
+                func_name = tool_call["function"]["name"]
+                args = json.loads(tool_call["function"]["arguments"])
+                self._log(f"Инструмент: {func_name}({list(args.keys())})")
+
+                try:
+                    result = await self._execute_tool(func_name, args)
+                    self._log(f"  Результат: {str(result)[:150]}...")
+                except Exception as e:
+                    result = {"error": str(e)}
+                    self._log(f"  Ошибка: {e}")
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+
+        return "Не удалось завершить за отведённое число шагов"

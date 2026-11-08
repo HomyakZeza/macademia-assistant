@@ -1,9 +1,7 @@
 """Список детей родителя"""
 
-import psycopg
-
 from ...config import load_settings
-from ..db import get_db
+from ..db import get_db, get_pg_connection
 
 
 def list_children(requester_people_id: str) -> dict:
@@ -19,7 +17,7 @@ def list_children(requester_people_id: str) -> dict:
         }
 
     try:
-        with psycopg.connect(settings.postgres_dsn) as pg:
+        with get_pg_connection(settings) as pg:
             rows = pg.execute(
                 """
                 SELECT DISTINCT f2.people::text
