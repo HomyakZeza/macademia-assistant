@@ -1,7 +1,6 @@
-"""Посещаемость"""
+"""Посещаемость."""
 
 from ..db import PermissionDenied, get_db, get_permission_service
-
 
 def get_attendance(
     requester_people_id: str,
@@ -15,11 +14,8 @@ def get_attendance(
 
     try:
         perm = get_permission_service()
-        if not perm.is_parent_of(requester_people_id, child_people_id):
-            raise PermissionDenied(
-                f"Requester {requester_people_id} не является родителем "
-                f"ребёнка {child_people_id}"
-            )
+        if not perm.is_allowed_to_see(requester_people_id, child_people_id):
+            raise PermissionDenied(f"Requester не имеет доступа к ребенку")
     except PermissionDenied as e:
         return {"error": str(e)}
 
@@ -55,10 +51,8 @@ def get_attendance(
     finally:
         conn.close()
 
-    present = 0
-    absent = 0
-    entries: list[dict] = []
-
+    present, absent = 0, 0
+    entries = []
     for date, subj, seq, topic, is_absent in rows:
         if subject and subj.strip().lower() != subject.strip().lower():
             continue
@@ -68,11 +62,7 @@ def get_attendance(
         else:
             present += 1
         entries.append({
-            "date": date,
-            "subject": subj,
-            "lesson_seq": seq,
-            "topic": topic,
-            "status": status,
+            "date": date, "subject": subj, "lesson_seq": seq, "topic": topic, "status": status,
         })
 
     return {

@@ -1,4 +1,5 @@
 """Комментарии учителей к ребенку."""
+
 from ..db import PermissionDenied, get_db, get_permission_service
 
 def get_comments(
@@ -8,8 +9,8 @@ def get_comments(
 ) -> dict:
     try:
         perm = get_permission_service()
-        if not perm.is_parent_of(requester_people_id, child_people_id):
-            raise PermissionDenied(f"Requester не является родителем ребенка")
+        if not perm.is_allowed_to_see(requester_people_id, child_people_id):
+            raise PermissionDenied(f"Requester не имеет доступа к ребенку")
     except PermissionDenied as e:
         return {"error": str(e)}
 

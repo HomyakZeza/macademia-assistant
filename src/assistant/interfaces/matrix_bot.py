@@ -6,6 +6,11 @@ import sys
 import warnings
 from pathlib import Path
 
+from rich.console import Console
+from rich.markdown import Markdown
+
+console = Console()
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 if sys.platform == "win32":
@@ -189,7 +194,8 @@ async def interactive_loop():
 
                 final_response = await agent.run_with_history(messages)
 
-                print(f"\nАгент: {final_response}")
+                console.print("\n[bold green]Агент:[/bold green]")
+                console.print(Markdown(final_response))
                 messages.append({"role": "assistant", "content": final_response})
 
             except KeyboardInterrupt:
