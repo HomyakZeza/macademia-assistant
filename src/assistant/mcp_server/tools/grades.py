@@ -22,6 +22,12 @@ def _format_homework(grade: Optional[float]) -> Optional[str]:
     return "Некорректная оценка (вне шкалы 0-5)."
 
 
+def _is_rewritten(comment: Optional[str]) -> bool:
+    if not comment:
+        return False
+    return comment.strip().startswith("--")
+
+
 def _check_permission(requester_people_id: str, child_people_id: str) -> None:
     perm = get_permission_service()
     if not perm.is_allowed_to_see(requester_people_id, child_people_id):
@@ -50,11 +56,10 @@ def get_grades(
     to_date: Optional[str] = None,
     kind: Optional[str] = None,
 ) -> dict:
-    """Возвращает оценки ребёнка с учетом правил раскрытия (BR-14, BR-17)"""
     if kind is not None and kind not in VALID_KINDS:
-        return {"error": f"invalid kind: {kind!r}. Допустимо: {', '.join(VALID_KINDS)} или null"}
+        return {"error": f"invalid kind: {kind!r}"}
     if from_date and to_date and from_date > to_date:
-        return {"error": f"from_date ({from_date}) > to_date ({to_date})"}
+        return {"error": f"from_date > to_date"}
 
     try:
         _check_permission(requester_people_id, child_people_id)
@@ -65,78 +70,51 @@ def get_grades(
     try:
         student = _find_student(conn, child_people_id)
         if not student:
-            return {"error": f"Ученик с people_id={child_people_id} не найден в текущей БД"}
+            return {"error": "Ученик не найден"}
 
         conditions = ["r.student_id = ?"]
-        params: list = [student["id"]]
-        if from_date:
-            conditions.append("l.date >= ?")
-            params.append(from_date)
-        if to_date:
-            conditions.append("l.date <= ?")
-            params.append(to_date)
+        params = [student["id"]]
+        if from_date: conditions.append("l.date >= ?"); params.append(from_date)
+        if to_date: conditions.append("l.date <= ?"); params.append(to_date)
 
-        rows = conn.execute(
-            f"""
-            SELECT l.date, l.subject, l.topic, l.lesson_seq,
-                   r.is_absent,
+        rows = conn.execute(f"""
+            SELECT l.date, l.subject, l.topic, l.lesson_seq, r.is_absent,
                    r.homework_grade, r.homework_comment, r.homework_completed_percent,
-                   r.lesson_grade, r.lesson_comment,
-                   r.test_grade, r.test_comment
-            FROM records r
-            JOIN lessons l ON l.id = r.lesson_id
-            WHERE {' AND '.join(conditions)}
-            ORDER BY l.date, l.lesson_seq
-            """,
-            params,
-        ).fetchall()
+                   r.lesson_grade, r.lesson_comment, r.test_grade, r.test_comment
+            FROM records r JOIN lessons l ON l.id = r.lesson_id
+            WHERE {' AND '.join(conditions)} ORDER BY l.date, l.lesson_seq
+        """, params).fetchall()
 
         grades = []
         for r in rows:
-            (date, subj, topic, seq, absent,
-             hw_g, hw_c, hw_p,
-             lw_g, lw_c,
-             ts_g, ts_c) = r
+            (date, subj, topic, seq, absent, hw_g, hw_c, hw_p, lw_g, lw_c, ts_g, ts_c) = r
+            if subject and not _subject_match(subj, subject): continue
 
-            if subject and not _subject_match(subj, subject):
-                continue
-
-            # BR-14: Скрываем оценки за классную работу ниже 4
             show_lesson_grade = lw_g is not None and lw_g >= 4.0
 
-            # Фильтрация по запрошенному типу
-            if kind == "homework" and hw_g is None:
-                continue
-            if kind == "lesson_work" and not show_lesson_grade:
-                continue
-            if kind == "test" and ts_g is None:
-                continue
-            if kind is None and hw_g is None and not show_lesson_grade and ts_g is None:
-                continue
+            if kind == "homework" and hw_g is None: continue
+            if kind == "lesson_work" and not show_lesson_grade: continue
+            if kind == "test" and ts_g is None: continue
+            if kind is None and hw_g is None and not show_lesson_grade and ts_g is None: continue
 
             grades.append({
-                "date": date,
-                "subject": subj,
-                "topic": topic,
-                "lesson_seq": seq,
-                "absent": bool(absent),
+                "date": date, "subject": subj, "topic": topic, "lesson_seq": seq, "absent": bool(absent),
                 "homework": {
                     "grade": hw_g,
-                    "description": _format_homework(hw_g), # BR-17
+                    "description": _format_homework(hw_g),
                     "comment": hw_c,
                     "completed_percent": hw_p
                 },
-                # BR-14: В JSON попадает только положительная оценка за урок
                 "lesson_work": {
                     "grade": lw_g if show_lesson_grade else None,
                     "comment": lw_c
                 },
                 "test": {
                     "grade": ts_g,
-                    "comment": ts_c
+                    "comment": ts_c,
+                    "is_significant": not _is_rewritten(ts_c)
                 }
             })
-
         return {"student": student, "grades": grades, "count": len(grades)}
     finally:
         conn.close()
@@ -149,9 +127,8 @@ def get_summary(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
 ) -> dict:
-    """Сводка: средние по типам, количество, пропуски (BR-14)"""
     if from_date and to_date and from_date > to_date:
-        return {"error": f"from_date ({from_date}) > to_date ({to_date})"}
+        return {"error": f"from_date > to_date"}
 
     try:
         _check_permission(requester_people_id, child_people_id)
@@ -162,78 +139,50 @@ def get_summary(
     try:
         student = _find_student(conn, child_people_id)
         if not student:
-            return {"error": f"Ученик с people_id={child_people_id} не найден"}
+            return {"error": "Ученик не найден"}
 
         conditions = ["r.student_id = ?"]
-        params: list = [student["id"]]
-        if from_date:
-            conditions.append("l.date >= ?")
-            params.append(from_date)
-        if to_date:
-            conditions.append("l.date <= ?")
-            params.append(to_date)
+        params = [student["id"]]
+        if from_date: conditions.append("l.date >= ?"); params.append(from_date)
+        if to_date: conditions.append("l.date <= ?"); params.append(to_date)
 
-        rows = conn.execute(
-            f"""
+        rows = conn.execute(f"""
             SELECT l.date, l.subject, r.is_absent,
-                   r.homework_grade, r.lesson_grade, r.test_grade
-            FROM records r
-            JOIN lessons l ON l.id = r.lesson_id
-            WHERE {' AND '.join(conditions)}
-            ORDER BY l.date
-            """,
-            params,
-        ).fetchall()
+                   r.homework_grade, r.lesson_grade, r.test_grade, r.test_comment
+            FROM records r JOIN lessons l ON l.id = r.lesson_id
+            WHERE {' AND '.join(conditions)} ORDER BY l.date
+        """, params).fetchall()
     finally:
         conn.close()
 
-    hw_values: list[float] = []
-    lw_values: list[float] = []
-    ts_values: list[float] = []
+    hw_values, lw_values, ts_values = [], [], []
     present, absent = 0, 0
-    dates_seen: list[str] = []
+    dates_seen = []
 
-    for date, subj, is_absent, hw, lw, ts in rows:
-        if subject and not _subject_match(subj, subject):
-            continue
+    for date, subj, is_absent, hw, lw, ts, ts_c in rows:
+        if subject and not _subject_match(subj, subject): continue
         dates_seen.append(date)
 
-        if is_absent:
-            absent += 1
-        else:
-            present += 1
+        if is_absent: absent += 1
+        else: present += 1
 
-        if hw is not None:
-            hw_values.append(hw)
-        # BR-14: Не учитываем в среднем оценки ниже 4
-        if lw is not None and lw >= 4.0:
-            lw_values.append(lw)
-        if ts is not None:
+        if hw is not None: hw_values.append(hw)
+        if lw is not None and lw >= 4.0: lw_values.append(lw)
+
+        if ts is not None and not _is_rewritten(ts_c):
             ts_values.append(ts)
 
     def stats(values: list[float]) -> dict:
-        if not values:
-            return {"values": [], "avg": None, "count": 0}
-        return {
-            "values": values,
-            "avg": round(sum(values) / len(values), 2),
-            "count": len(values),
-        }
+        if not values: return {"values": [], "avg": None, "count": 0}
+        return {"values": values, "avg": round(sum(values) / len(values), 2), "count": len(values)}
 
     return {
         "student": student,
-        "period": {
-            "from": min(dates_seen) if dates_seen else None,
-            "to": max(dates_seen) if dates_seen else None,
-        },
-        "attendance": {
-            "present": present,
-            "absent": absent,
-            "total": present + absent,
-        },
+        "period": {"from": min(dates_seen) if dates_seen else None, "to": max(dates_seen) if dates_seen else None},
+        "attendance": {"present": present, "absent": absent, "total": present + absent},
         "by_kind": {
             "homework": stats(hw_values),
-            "lesson_work": stats(lw_values), # Здесь только 4 и 5
+            "lesson_work": stats(lw_values),
             "test": stats(ts_values),
         },
     }
