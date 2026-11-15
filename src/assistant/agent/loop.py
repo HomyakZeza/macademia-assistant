@@ -1,4 +1,6 @@
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from mcp import ClientSession
@@ -32,6 +34,17 @@ class AgentLoop:
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(msg)
+
+    def _inject_current_date(self, messages: list[dict]) -> None:
+        """Добавляет или обновляет текущую дату в первом системном сообщении"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if messages and messages[0]["role"] == "system":
+            content = messages[0]["content"]
+            content = re.sub(r"^Текущая дата и время: .*?\n\n", "", content)
+            messages[0]["content"] = f"Текущая дата и время: {current_time}\n\n{content}"
+        else:
+            messages.insert(0, {"role": "system", "content": f"Текущая дата и время: {current_time}"})
 
     async def _load_tools(self) -> list[dict]:
         if self._tools_schema is not None:
@@ -99,10 +112,14 @@ class AgentLoop:
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_query},
         ]
+        self._inject_current_date(messages)
         return await self._run_loop(messages, tools_schema)
 
     async def run_with_history(self, messages: list[dict]) -> str:
         tools_schema = await self._load_tools()
+
+        self._inject_current_date(messages)
+
         result = await self._run_loop(messages, tools_schema)
         return result.get("final_response", "")
 
