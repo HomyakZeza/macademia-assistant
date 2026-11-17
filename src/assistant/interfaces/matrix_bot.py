@@ -1,7 +1,5 @@
 import asyncio
 import json
-import os
-import re
 import sys
 import warnings
 from pathlib import Path
@@ -9,19 +7,17 @@ from pathlib import Path
 from rich.console import Console
 from rich.markdown import Markdown
 
-console = Console()
-
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 if sys.platform == "win32":
     policy = (
-        getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-        or getattr(asyncio, "_WindowsSelectorEventLoopPolicy", None)
+            getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+            or getattr(asyncio, "_WindowsSelectorEventLoopPolicy", None)
     )
     if policy:
         asyncio.set_event_loop_policy(policy())
 
-from ..agent.loop import AgentLoop, SYSTEM_PROMPT
+from ..agent.loop import AgentLoop
 from ..agent.runner import mcp_stdio_session
 from ..llm.client import DeepSeekClient
 from ..sandbox.executor import SandboxExecutor
@@ -29,15 +25,15 @@ from ..config import load_settings
 from ..mcp_server.db import get_pg_connection
 from ..mcp_server.tools.students import list_children
 
+console = Console()
 CURRENT_USER_FILE = Path("data/output/.current_user.json")
 
 
 def find_user_by_name(name: str) -> dict | None:
     settings = load_settings()
     if not settings.postgres_dsn:
-        print("PostgreSQL не настроен (POSTGRES_DSN). Поиск пользователя недоступен.")
+        console.print("[red]PostgreSQL не настроен (POSTGRES_DSN).[/red]")
         return None
-
     try:
         with get_pg_connection(settings) as pg:
             row = pg.execute(
@@ -52,12 +48,10 @@ def find_user_by_name(name: str) -> dict | None:
                 """,
                 (f"%{name.strip()}%",),
             ).fetchone()
-
             if row:
                 return {"people_id": row[0], "name": row[1]}
     except Exception as e:
-        print(f"Ошибка при поиске в PostgreSQL: {e}")
-
+        console.print(f"[red]Ошибка при поиске в PostgreSQL: {e}[/red]")
     return None
 
 
@@ -75,51 +69,45 @@ def save_current_user(user_data: dict) -> None:
     CURRENT_USER_FILE.write_text(json.dumps(user_data, ensure_ascii=False), encoding="utf-8")
 
 
-def build_system_prompt(user_id: str) -> str:
-    return (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"requester_people_id твоего пользователя: {user_id}. "
-        f"Если нужно узнать, о каких детях идёт речь, сначала вызови list_children "
-        f"с этим ID, затем используй child_people_id из результата."
-    )
-
-
 async def interactive_loop():
-    print("=" * 60)
-    print("🤖 Macademia Assistant (эмуляция Matrix-бота)")
-    print("Введите /help для списка команд.")
-    print("=" * 60)
+    console.print("[bold cyan]============================================================[/bold cyan]")
+    console.print("[bold cyan]🤖 Macademia Assistant (эмуляция Matrix-бота)[/bold cyan]")
+    console.print("[bold cyan]Введите /help для списка команд.[/bold cyan]")
+    console.print("[bold cyan]============================================================[/bold cyan]\n")
 
     current_user = load_current_user()
 
     if current_user:
-        print(f"\n[Система] Вы вошли как: {current_user['name']} (ID: {current_user['people_id']})")
+        console.print(
+            f"[green][Система] Вы вошли как: {current_user['name']} (ID: {current_user['people_id']})[/green]")
         requester_id = current_user["people_id"]
-        messages = [{"role": "system", "content": build_system_prompt(requester_id)}]
     else:
-        print("\n[Система] Вы не авторизованы. Введите `/user <ФИО>` для входа.")
+        console.print("[yellow][Система] Вы не авторизованы. Введите `/user <ФИО>` для входа.[/yellow]")
         requester_id = None
-        messages = []
 
+    messages = []
     verbose = True
 
     async with mcp_stdio_session() as mcp_session:
-        agent = AgentLoop(
-            llm=DeepSeekClient(),
-            sandbox=SandboxExecutor(),
-            mcp_session=mcp_session,
-            verbose=verbose,
-        )
+        agent = None
+        if requester_id:
+            agent = AgentLoop(
+                llm=DeepSeekClient(),
+                sandbox=SandboxExecutor(),
+                mcp_session=mcp_session,
+                requester_people_id=requester_id,
+                verbose=verbose,
+            )
 
         while True:
             try:
-                user_input = await asyncio.to_thread(input, "\nВы: ")
+                user_input = await asyncio.to_thread(console.input, "\n[bold]Вы:[/bold] ")
                 user_input = user_input.strip()
 
                 if not user_input:
                     continue
                 if user_input.lower() in ("exit", "quit", "выход"):
-                    print("До свидания!")
+                    console.print("[yellow]До свидания![/yellow]")
                     break
 
                 if user_input.startswith("/"):
@@ -128,81 +116,87 @@ async def interactive_loop():
                     arg = parts[1] if len(parts) > 1 else ""
 
                     if cmd == "/help":
-                        print("\n[Система] Доступные команды:")
-                        print("  /user <ФИО>     - переключиться на другого пользователя (сброс контекста)")
-                        print("  /verbose on|off - включить/выключить показ шагов агента")
-                        print("  /help           - показать это сообщение")
-                        print("  exit            - выйти")
+                        console.print("\n[cyan][Система] Доступные команды:[/cyan]")
+                        console.print("  /user <ФИО>     - переключиться на другого пользователя (сброс контекста)")
+                        console.print("  /verbose on|off - включить/выключить показ шагов агента")
+                        console.print("  /help           - показать это сообщение")
+                        console.print("  exit            - выйти")
                         continue
 
                     elif cmd == "/verbose":
                         if arg.lower() == "on":
                             verbose = True
-                            agent.verbose = True
-                            print("[Система] Verbose режим включен.")
+                            if agent: agent.verbose = True
+                            console.print("[green][Система] Verbose режим включен.[/green]")
                         elif arg.lower() == "off":
                             verbose = False
-                            agent.verbose = False
-                            print("[Система] Verbose режим выключен.")
+                            if agent: agent.verbose = False
+                            console.print("[green][Система] Verbose режим выключен.[/green]")
                         else:
-                            print("[Система] Используйте: /verbose on | off")
+                            console.print("[red][Система] Используйте: /verbose on | off[/red]")
                         continue
 
                     elif cmd == "/user":
                         if not arg:
-                            print("[Система] Используйте: /user <ФИО>")
+                            console.print("[red][Система] Используйте: /user <ФИО>[/red]")
                             continue
 
-                        print(f"[Система] Ищем пользователя: {arg}...")
+                        console.print(f"[yellow][Система] Ищем пользователя: {arg}...[/yellow]")
                         found = find_user_by_name(arg)
 
                         if not found:
-                            print(f"[Система] ❌ Пользователь '{arg}' не найден (или у него нет детей).")
+                            console.print(
+                                f"[red][Система] ❌ Пользователь '{arg}' не найден (или у него нет детей).[/red]")
                             continue
 
                         requester_id = found["people_id"]
                         save_current_user(found)
 
                         # СБРОС КОНТЕКСТА
-                        messages = [{"role": "system", "content": build_system_prompt(requester_id)}]
+                        messages = []
 
-                        print(f"\n[Система] ✅ Вы переключились на: {found['name']}")
-                        print("[Система] История диалога очищена.")
+                        agent = AgentLoop(
+                            llm=DeepSeekClient(),
+                            sandbox=SandboxExecutor(),
+                            mcp_session=mcp_session,
+                            requester_people_id=requester_id,
+                            verbose=verbose,
+                        )
+
+                        console.print(f"\n[green][Система] ✅ Вы переключились на: {found['name']}[/green]")
+                        console.print("[green][Система] История диалога очищена.[/green]")
 
                         try:
                             children_res = list_children(requester_id)
                             if "children" in children_res and children_res["children"]:
-                                print("[Система] Ваши дети:")
+                                console.print("[cyan][Система] Ваши дети:[/cyan]")
                                 for c in children_res["children"]:
-                                    print(f"  - {c['name']} ({c['class_level']} класс)")
+                                    console.print(f"  - {c['name']} ({c['class_level']} класс)")
                         except Exception as e:
-                            print(f"[Система] Не удалось загрузить список детей: {e}")
-
+                            console.print(f"[red][Система] Не удалось загрузить список детей: {e}[/red]")
                         continue
 
                     else:
-                        print(f"[Система] Неизвестная команда: {cmd}. Введите /help.")
+                        console.print(f"[red][Система] Неизвестная команда: {cmd}. Введите /help.[/red]")
                         continue
 
-                # ОБРАБОТКА ТЕКСТА ДЛЯ LLM
-                if not requester_id:
-                    print("[Система] Сначала авторизуйтесь: /user <ФИО>")
+                if not requester_id or not agent:
+                    console.print("[red][Система] Сначала авторизуйтесь: /user <ФИО>[/red]")
                     continue
 
                 messages.append({"role": "user", "content": user_input})
-                print("\n[Агент думает...]")
+                console.print("\n[yellow][Агент думает...][/yellow]")
 
                 final_response = await agent.run_with_history(messages)
 
                 console.print("\n[bold green]Агент:[/bold green]")
                 console.print(Markdown(final_response))
-                messages.append({"role": "assistant", "content": final_response})
 
             except KeyboardInterrupt:
-                print("\n\n[Система] Завершение работы по Ctrl+C...")
+                console.print("\n[yellow][Система] Завершение работы по Ctrl+C...[/yellow]")
                 break
             except Exception as e:
-                print(f"\n[Ошибка]: {e}")
+                console.print(f"\n[red][Ошибка]: {e}[/red]")
 
 
 if __name__ == "__main__":

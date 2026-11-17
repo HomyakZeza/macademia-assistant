@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,12 +20,14 @@ class AgentLoop:
             llm: DeepSeekClient,
             sandbox: SandboxExecutor,
             mcp_session: ClientSession,
+            requester_people_id: str,
             max_steps: int = 10,
             verbose: bool = False,
     ):
         self.llm = llm
         self.sandbox = sandbox
         self.mcp_session = mcp_session
+        self.requester_people_id = requester_people_id
         self.max_steps = max_steps
         self.verbose = verbose
         self._tools_schema: list[dict] | None = None
@@ -34,17 +35,6 @@ class AgentLoop:
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(msg)
-
-    def _inject_current_date(self, messages: list[dict]) -> None:
-        """Добавляет или обновляет текущую дату в первом системном сообщении"""
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if messages and messages[0]["role"] == "system":
-            content = messages[0]["content"]
-            content = re.sub(r"^Текущая дата и время: .*?\n\n", "", content)
-            messages[0]["content"] = f"Текущая дата и время: {current_time}\n\n{content}"
-        else:
-            messages.insert(0, {"role": "system", "content": f"Текущая дата и время: {current_time}"})
 
     async def _load_tools(self) -> list[dict]:
         if self._tools_schema is not None:
@@ -98,35 +88,37 @@ class AgentLoop:
         except json.JSONDecodeError:
             return {"error": text_content}
 
-    async def run(self, user_query: str, requester_people_id: str) -> dict:
+    async def run(self, user_query: str) -> dict:
         tools_schema = await self._load_tools()
-
-        system_content = (
-            f"{SYSTEM_PROMPT}\n\n"
-            f"requester_people_id твоего пользователя: {requester_people_id}. "
-            f"Если нужно узнать, о каких детях идёт речь, сначала вызови list_children "
-            f"с этим ID, затем используй child_people_id из результата."
-        )
-
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_query},
-        ]
-        self._inject_current_date(messages)
+        messages = [{"role": "user", "content": user_query}]
         return await self._run_loop(messages, tools_schema)
 
     async def run_with_history(self, messages: list[dict]) -> str:
         tools_schema = await self._load_tools()
-
-        self._inject_current_date(messages)
-
         result = await self._run_loop(messages, tools_schema)
         return result.get("final_response", "")
 
     async def _run_loop(self, messages: list[dict], tools_schema: list[dict]) -> dict:
         for step in range(1, self.max_steps + 1):
             self._log(f"\n--- Шаг {step} ---")
-            response = self.llm.chat(messages, tools=tools_schema)
+
+            context = {
+                "current_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "requester_people_id": self.requester_people_id,
+            }
+
+            api_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{SYSTEM_PROMPT}\n\n"
+                        f"Контекст запроса: {json.dumps(context, ensure_ascii=False)}"
+                    ),
+                },
+                *messages,
+            ]
+
+            response = self.llm.chat(api_messages, tools=tools_schema)
             messages.append(response)
 
             tool_calls = response.get("tool_calls")
